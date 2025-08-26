@@ -55,7 +55,8 @@ def load_excel(path_str: str) -> pd.DataFrame:
         raise ValueError(f"Missing columns: {missing}")
     
     # Clean the data properly
-    print("Cleaning data...")
+    print("🧹 Cleaning data...")
+    original_rows = len(df)
     
     # Define numeric columns that need cleaning
     numeric_cols = ["TC (Deg. C)", "TO (Deg. C)", "Qo(kW)", "P(kW)", "I(A)", "COP", 
@@ -64,23 +65,29 @@ def load_excel(path_str: str) -> pd.DataFrame:
     # Replace "-" and other non-numeric values with NaN, then convert to numeric
     for col in numeric_cols:
         if col in df.columns:
-            # Replace "-" and empty strings with NaN
-            df[col] = df[col].replace(["-", "", " "], np.nan)
+            # Replace various forms of missing data
+            df[col] = df[col].replace(["-", "", " ", "NaN", "nan", "NULL", "null"], np.nan)
             # Convert to numeric, coercing errors to NaN
             df[col] = pd.to_numeric(df[col], errors='coerce')
     
     # Convert refrigerants to lowercase for consistent matching
-    df["Refrigerant"] = df["Refrigerant"].str.lower().str.strip()
+    df["Refrigerant"] = df["Refrigerant"].astype(str).str.lower().str.strip()
     
-    # Remove rows where critical columns (Qo, TC, TO) are all NaN or zero
+    # Remove rows where critical columns (Qo, TC, TO) are all NaN
     critical_cols = ["Qo(kW)", "TC (Deg. C)", "TO (Deg. C)"]
+    before_critical = len(df)
     df = df.dropna(subset=critical_cols, how='all')
+    print(f"📉 Removed {before_critical - len(df)} rows with missing critical data")
     
-    # Remove rows where Qo is 0 or negative (not useful for matching)
+    # Remove rows where Qo is 0, negative, or NaN (not useful for matching)
+    before_qo = len(df)
     df = df[(df["Qo(kW)"] > 0) & (df["Qo(kW)"].notna())]
+    print(f"📉 Removed {before_qo - len(df)} rows with invalid Qo values")
     
-    print(f"After cleaning: {len(df)} valid rows with non-zero Qo values")
-    print(f"Qo range: {df['Qo(kW)'].min():.1f} - {df['Qo(kW)'].max():.1f} kW")
+    print(f"✅ Data cleaning complete: {original_rows} → {len(df)} valid rows")
+    if len(df) > 0:
+        print(f"⚡ Qo range: {df['Qo(kW)'].min():.1f} - {df['Qo(kW)'].max():.1f} kW")
+        print(f"🧪 Refrigerants: {sorted(df['Refrigerant'].unique())}")
     
     return df
 
@@ -88,9 +95,16 @@ def load_excel(path_str: str) -> pd.DataFrame:
 data_path = os.getenv("DATA_PATH", "data/models.xlsx")
 try:
     df = load_excel(data_path)
-    print(f"Loaded {len(df):,} rows from {data_path}")
+    print(f"✅ Successfully loaded {len(df):,} rows from {data_path}")
+    print(f"📊 Data shape: {df.shape}")
+    print(f"🧪 Available refrigerants: {len(df['Refrigerant'].unique())}")
+    print(f"⚡ Qo range: {df['Qo(kW)'].min():.1f} - {df['Qo(kW)'].max():.1f} kW")
 except Exception as e:
-    print(f"Failed to load data: {e}")
+    print(f"❌ Failed to load data from {data_path}: {e}")
+    print(f"📁 Current working directory: {os.getcwd()}")
+    print(f"📁 Data path exists: {os.path.exists(data_path)}")
+    if os.path.exists("data"):
+        print(f"📁 Files in data directory: {os.listdir('data')}")
     df = pd.DataFrame()
 
 # ---- Matching logic ----
@@ -254,8 +268,14 @@ def search_heat_pumps():
                 'available_refrigerants': sorted(df["Refrigerant"].dropna().unique().tolist())
             })
         
-        # Convert DataFrame to dict for JSON response
+        # Convert DataFrame to dict for JSON response, handling NaN values
         results_dict = results.to_dict('records')
+        
+        # Replace NaN values with None (which becomes null in JSON)
+        for record in results_dict:
+            for key, value in record.items():
+                if pd.isna(value) or (isinstance(value, float) and np.isnan(value)):
+                    record[key] = None
         
         return jsonify({
             'success': True,

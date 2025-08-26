@@ -243,19 +243,29 @@ document.getElementById('searchForm').addEventListener('submit', async function(
             body: JSON.stringify(data)
         });
         
-        const result = await response.json();
-        
         document.querySelector('.loading').style.display = 'none';
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
         
         if (result.success) {
             displayResults(result);
             document.querySelector('.results-section').style.display = 'block';
         } else {
-            alert(result.message);
+            console.error('Search failed:', result);
+            let errorMsg = result.message || 'Unknown error occurred';
+            if (result.available_refrigerants) {
+                errorMsg += `\n\nAvailable refrigerants: ${result.available_refrigerants.join(', ')}`;
+            }
+            alert(errorMsg);
         }
     } catch (error) {
         document.querySelector('.loading').style.display = 'none';
-        alert('Error occurred while searching: ' + error.message);
+        console.error('Search error details:', error);
+        alert(`Error occurred while searching: ${error.message}\n\nPlease check the browser console for more details.`);
     }
 });
 
@@ -286,7 +296,11 @@ function displayResults(result) {
         tableBody.innerHTML = result.results.map(row => {
             return '<tr>' + headers.map(header => {
                 let value = row[header];
-                if (typeof value === 'number') {
+                
+                // Handle null/undefined values
+                if (value === null || value === undefined) {
+                    value = '-';
+                } else if (typeof value === 'number') {
                     if (header === 'Qo_diff_percent') {
                         value = value.toFixed(1) + '%';
                     } else if (header === 'distance') {
@@ -298,14 +312,16 @@ function displayResults(result) {
                 
                 // Highlight good matches
                 let cellClass = '';
-                if (header === 'Qo_diff_percent' && value !== null && value !== '') {
+                if (header === 'Qo_diff_percent' && value !== null && value !== undefined && value !== '-') {
                     const numValue = parseFloat(value);
-                    if (numValue <= 5) cellClass = 'table-success';
-                    else if (numValue <= 15) cellClass = 'table-warning';
-                    else cellClass = 'table-danger';
+                    if (!isNaN(numValue)) {
+                        if (numValue <= 5) cellClass = 'table-success';
+                        else if (numValue <= 15) cellClass = 'table-warning';
+                        else cellClass = 'table-danger';
+                    }
                 }
                 
-                return `<td class="${cellClass}">${value || ''}</td>`;
+                return `<td class="${cellClass}">${value}</td>`;
             }).join('') + '</tr>';
         }).join('');
     }
