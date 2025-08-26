@@ -13,8 +13,8 @@ run:
     - pip3 install --upgrade pip
     - pip3 install -r requirements.txt
     # Optional: quick sanity check
-    - python3 -c "import streamlit, sys; print('Streamlit OK', streamlit.__version__, sys.executable)"
-  command: python3 -m streamlit run app.py --server.port 8080 --server.address=0.0.0.0 --server.headless=true
+    - python3 -c "import flask, sys; print('Flask OK', flask.__version__, sys.executable)"
+  command: python3 flask_app.py
   network:
     port: 8080
   env:

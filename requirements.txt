@@ -1,5 +1,5 @@
-streamlit
+flask
 pandas
 openpyxl
-streamlit-authenticator
 numpy
+werkzeug
