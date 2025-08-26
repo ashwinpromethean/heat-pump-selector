@@ -17,3 +17,20 @@ run:
   command: python3 -m streamlit run app.py --server.port 8080 --server.address=0.0.0.0 --server.headless=true
   network:
     port: 8080
+  env:
+    - name: ADMIN_EMAIL
+      value: "admin@prometheanenergy.com"
+    - name: ADMIN_PASSWORD
+      value: "Promethean@123"
+    - name: VIEWER_EMAIL
+      value: "common@prometheanenergy.com"
+    - name: VIEWER_PASSWORD
+      value: "viewer_password"
+    - name: COOKIE_NAME
+      value: "modelpicker_auth"
+    - name: COOKIE_KEY
+      value: "long-random-secret-key-for-production-change-this"
+    - name: COOKIE_EXPIRY_DAYS
+      value: "7"
+    - name: DATA_PATH
+      value: "data/models.xlsx"
