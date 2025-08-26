@@ -16,11 +16,11 @@ COPY app.py .
 COPY data/ ./data/
 COPY .streamlit/ ./.streamlit/
 
-# Expose port 8501 (Streamlit's default)
-EXPOSE 8501
+# Expose port 8080 (App Runner default)
+EXPOSE 8080
 
 # Health check
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
+HEALTHCHECK CMD curl --fail http://localhost:8080/_stcore/health
 
 # Run the application
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.address=0.0.0.0"]
