@@ -46,14 +46,41 @@ def load_excel(path_str: str) -> pd.DataFrame:
     path = Path(path_str)
     if not path.exists():
         raise FileNotFoundError(f"Data file not found at: {path}")
+    
+    # Load the Excel file
     df = pd.read_excel(path)
     df.columns = [c.strip() for c in df.columns]
     missing = [c for c in REQUIRED_COLS if c not in df.columns]
     if missing:
         raise ValueError(f"Missing columns: {missing}")
     
+    # Clean the data properly
+    print("Cleaning data...")
+    
+    # Define numeric columns that need cleaning
+    numeric_cols = ["TC (Deg. C)", "TO (Deg. C)", "Qo(kW)", "P(kW)", "I(A)", "COP", 
+                   "mLP(kg/h)", "mHP(kg/h)", "tcu(deg. C)", "Qsc(kW)", "pm(bar)", "Qac(kW)"]
+    
+    # Replace "-" and other non-numeric values with NaN, then convert to numeric
+    for col in numeric_cols:
+        if col in df.columns:
+            # Replace "-" and empty strings with NaN
+            df[col] = df[col].replace(["-", "", " "], np.nan)
+            # Convert to numeric, coercing errors to NaN
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
     # Convert refrigerants to lowercase for consistent matching
-    df["Refrigerant"] = df["Refrigerant"].str.lower()
+    df["Refrigerant"] = df["Refrigerant"].str.lower().str.strip()
+    
+    # Remove rows where critical columns (Qo, TC, TO) are all NaN or zero
+    critical_cols = ["Qo(kW)", "TC (Deg. C)", "TO (Deg. C)"]
+    df = df.dropna(subset=critical_cols, how='all')
+    
+    # Remove rows where Qo is 0 or negative (not useful for matching)
+    df = df[(df["Qo(kW)"] > 0) & (df["Qo(kW)"].notna())]
+    
+    print(f"After cleaning: {len(df)} valid rows with non-zero Qo values")
+    print(f"Qo range: {df['Qo(kW)'].min():.1f} - {df['Qo(kW)'].max():.1f} kW")
     
     return df
 
@@ -68,41 +95,86 @@ except Exception as e:
 
 # ---- Matching logic ----
 def nearest_rows(df, qo, tc, to, refrigerant, k=5, weights=None, exact_tc=False, exact_to=False):
+    """
+    Find heat pumps closest to the specified criteria, prioritizing Qo (heating capacity) matching.
+    """
     # Convert refrigerant to lowercase for matching
-    refrigerant_lower = refrigerant.lower()
+    refrigerant_lower = refrigerant.lower().strip()
+    
+    # Filter by refrigerant first
     sub = df[df["Refrigerant"] == refrigerant_lower].copy()
-    if exact_tc: sub = sub[sub["TC (Deg. C)"] == tc]
-    if exact_to: sub = sub[sub["TO (Deg. C)"] == to]
-    if sub.empty: return pd.DataFrame()
-
-    cols = {"Qo(kW)": qo, "TC (Deg. C)": tc, "TO (Deg. C)": to}
-    
-    # Clean data: convert non-numeric values to NaN and then drop rows with NaN in key columns
-    for c in cols.keys():
-        sub[c] = pd.to_numeric(sub[c], errors='coerce')
-    
-    # Remove rows where any of the key columns have NaN values
-    sub = sub.dropna(subset=list(cols.keys()))
-    
-    if sub.empty: 
+    if sub.empty:
+        print(f"No heat pumps found for refrigerant: {refrigerant}")
         return pd.DataFrame()
     
-    # Calculate standard deviations (now safe since we've cleaned the data)
-    sigmas = {c: float(sub[c].std(ddof=0)) or 1.0 for c in cols}
-    weights = weights or {c: 1.0 for c in cols}
-
-    dist_sq = np.zeros(len(sub), dtype=float)
-    for c, target in cols.items():
-        z = (sub[c].astype(float) - float(target)) / (sigmas[c] if sigmas[c] > 1e-9 else 1.0)
-        dist_sq += float(weights.get(c, 1.0)) * (z ** 2)
-
-    sub["distance"] = np.sqrt(dist_sq)
+    print(f"Found {len(sub)} heat pumps with refrigerant {refrigerant}")
+    
+    # Apply exact temperature constraints if requested
+    if exact_tc:
+        sub = sub[sub["TC (Deg. C)"] == tc]
+        print(f"After exact TC filter ({tc}°C): {len(sub)} heat pumps")
+    if exact_to:
+        sub = sub[sub["TO (Deg. C)"] == to]
+        print(f"After exact TO filter ({to}°C): {len(sub)} heat pumps")
+    
+    if sub.empty:
+        print("No heat pumps found after applying exact temperature filters")
+        return pd.DataFrame()
+    
+    # Ensure we have valid numeric data for key columns
+    key_cols = ["Qo(kW)", "TC (Deg. C)", "TO (Deg. C)"]
+    sub = sub.dropna(subset=key_cols)
+    
+    if sub.empty:
+        print("No heat pumps found with valid numeric data for key columns")
+        return pd.DataFrame()
+    
+    # Set default weights (prioritize Qo matching)
+    if weights is None:
+        weights = {"Qo(kW)": 3.0, "TC (Deg. C)": 1.0, "TO (Deg. C)": 1.0}
+    
+    # Calculate normalized distances for each parameter
+    cols_targets = {"Qo(kW)": qo, "TC (Deg. C)": tc, "TO (Deg. C)": to}
+    
+    # Calculate standard deviations for normalization (avoid division by zero)
+    sigmas = {}
+    for col in cols_targets.keys():
+        std_val = sub[col].std()
+        sigmas[col] = std_val if std_val > 0.01 else 1.0  # Minimum std to avoid division by very small numbers
+    
+    print(f"Standard deviations - Qo: {sigmas['Qo(kW)']:.2f}, TC: {sigmas['TC (Deg. C)']:.2f}, TO: {sigmas['TO (Deg. C)']:.2f}")
+    
+    # Calculate weighted distance
+    total_distance = np.zeros(len(sub))
+    
+    for col, target in cols_targets.items():
+        # Normalized difference
+        normalized_diff = (sub[col] - target) / sigmas[col]
+        weighted_diff = weights[col] * (normalized_diff ** 2)
+        total_distance += weighted_diff
+    
+    # Add distance as square root (Euclidean distance)
+    sub = sub.copy()
+    sub["distance"] = np.sqrt(total_distance)
+    
+    # Calculate absolute differences for display
     sub["ΔQo"] = (sub["Qo(kW)"] - qo).round(3)
     sub["ΔTC"] = (sub["TC (Deg. C)"] - tc).round(3)
     sub["ΔTO"] = (sub["TO (Deg. C)"] - to).round(3)
-
-    out_cols = REQUIRED_COLS + ["ΔQo","ΔTC","ΔTO","distance"]
-    return sub.sort_values(["distance","COP"], ascending=[True, False]).head(k)[out_cols]
+    sub["Qo_diff_percent"] = (abs(sub["ΔQo"]) / qo * 100).round(1)
+    
+    # Sort by distance (closest first), then by COP (highest first) as tiebreaker
+    sub = sub.sort_values(["distance", "COP"], ascending=[True, False])
+    
+    # Select output columns
+    out_cols = REQUIRED_COLS + ["ΔQo", "ΔTC", "ΔTO", "Qo_diff_percent", "distance"]
+    result = sub.head(k)[out_cols]
+    
+    print(f"Returning top {len(result)} matches")
+    if len(result) > 0:
+        print(f"Best match: Qo={result.iloc[0]['Qo(kW)']} kW (Δ={result.iloc[0]['ΔQo']} kW, {result.iloc[0]['Qo_diff_percent']}% diff)")
+    
+    return result
 
 # ---- Routes ----
 @app.route('/login', methods=['GET', 'POST'])
@@ -176,7 +248,11 @@ def search_heat_pumps():
         )
         
         if results.empty:
-            return jsonify({'success': False, 'message': 'No heat pumps found—try adjusting your criteria or relax exact matches.'})
+            return jsonify({
+                'success': False, 
+                'message': f'No heat pumps found for refrigerant "{refrigerant}" with the specified criteria. Try adjusting your search parameters or relax exact temperature matches.',
+                'available_refrigerants': sorted(df["Refrigerant"].dropna().unique().tolist())
+            })
         
         # Convert DataFrame to dict for JSON response
         results_dict = results.to_dict('records')

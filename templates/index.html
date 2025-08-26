@@ -122,17 +122,18 @@
                         <div id="weightsCollapse" class="accordion-collapse collapse">
                             <div class="accordion-body">
                                 <div class="mb-2">
-                                    <label for="w_qo" class="form-label">Weight Qo</label>
-                                    <input type="number" class="form-control form-control-sm" id="w_qo" name="w_qo" value="1.0" min="0" step="0.1">
+                                    <label for="w_qo" class="form-label">Weight Qo (Heating Capacity)</label>
+                                    <input type="number" class="form-control form-control-sm" id="w_qo" name="w_qo" value="3.0" min="0" step="0.1">
                                 </div>
                                 <div class="mb-2">
-                                    <label for="w_tc" class="form-label">Weight TC</label>
+                                    <label for="w_tc" class="form-label">Weight TC (Condensing Temp)</label>
                                     <input type="number" class="form-control form-control-sm" id="w_tc" name="w_tc" value="1.0" min="0" step="0.1">
                                 </div>
                                 <div class="mb-2">
-                                    <label for="w_to" class="form-label">Weight TO</label>
+                                    <label for="w_to" class="form-label">Weight TO (Evaporating Temp)</label>
                                     <input type="number" class="form-control form-control-sm" id="w_to" name="w_to" value="1.0" min="0" step="0.1">
                                 </div>
+                                <small class="text-muted">Higher weights prioritize that parameter in matching. Default weights prioritize heating capacity (Qo) matching.</small>
                             </div>
                         </div>
                     </div>
@@ -273,16 +274,38 @@ function displayResults(result) {
     if (result.results.length > 0) {
         // Create table header
         const headers = Object.keys(result.results[0]);
-        tableHeader.innerHTML = headers.map(header => `<th>${header}</th>`).join('');
+        tableHeader.innerHTML = headers.map(header => {
+            // Format header names for better display
+            let displayHeader = header;
+            if (header === 'Qo_diff_percent') displayHeader = 'Qo Diff %';
+            else if (header === 'distance') displayHeader = 'Match Score';
+            return `<th>${displayHeader}</th>`;
+        }).join('');
         
         // Create table body
         tableBody.innerHTML = result.results.map(row => {
             return '<tr>' + headers.map(header => {
                 let value = row[header];
                 if (typeof value === 'number') {
-                    value = value.toFixed(3);
+                    if (header === 'Qo_diff_percent') {
+                        value = value.toFixed(1) + '%';
+                    } else if (header === 'distance') {
+                        value = value.toFixed(3);
+                    } else {
+                        value = value.toFixed(3);
+                    }
                 }
-                return `<td>${value || ''}</td>`;
+                
+                // Highlight good matches
+                let cellClass = '';
+                if (header === 'Qo_diff_percent' && value !== null && value !== '') {
+                    const numValue = parseFloat(value);
+                    if (numValue <= 5) cellClass = 'table-success';
+                    else if (numValue <= 15) cellClass = 'table-warning';
+                    else cellClass = 'table-danger';
+                }
+                
+                return `<td class="${cellClass}">${value || ''}</td>`;
             }).join('') + '</tr>';
         }).join('');
     }
