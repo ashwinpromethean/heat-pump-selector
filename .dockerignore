@@ -1,0 +1,11 @@
+.git
+.gitignore
+README.md
+.env
+.DS_Store
+__pycache__
+*.pyc
+.pytest_cache
+.vscode
+*.md
+apprunner.yaml
