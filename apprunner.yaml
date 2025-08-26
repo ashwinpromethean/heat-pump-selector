@@ -1,18 +1,19 @@
 version: 1.0
 runtime: python311
 
+# No package installs in build for Python 3.11 revised build
 build:
   commands:
     build:
-      - echo "Installing Python packages..."
-      - pip3 install --upgrade pip
-      - pip3 install streamlit pandas openpyxl streamlit-authenticator numpy
-      - pip3 install -r requirements.txt
-      - echo "Verifying streamlit installation..."
-      - python3 -c "import streamlit; print('Streamlit version:', streamlit.__version__)"
+      - echo "Build step (no pip here for py311 revised build)"
 
 run:
   runtime-version: 3.11
+  pre-run:
+    - pip3 install --upgrade pip
+    - pip3 install -r requirements.txt
+    # Optional: quick sanity check
+    - python3 -c "import streamlit, sys; print('Streamlit OK', streamlit.__version__, sys.executable)"
   command: python3 -m streamlit run app.py --server.port $PORT --server.address=0.0.0.0 --server.headless=true
   network:
     port: 8080
